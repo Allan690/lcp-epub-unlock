@@ -16,14 +16,20 @@ from Crypto.Cipher import AES
 from lcp_crypto import decrypt_lcp_data, find_user_key, maybe_inflate
 
 
-def decrypt_epub(inpath: Path, outpath: Path, passphrase: str) -> None:
+def decrypt_epub(inpath: Path, outpath: Path, passphrase: str, license_file: Path | None = None) -> None:
     with closing(zipfile.ZipFile(inpath, "r")) as zin:
-        if "META-INF/license.lcpl" not in zin.namelist():
-            raise ValueError("Not an LCP-protected EPUB (missing META-INF/license.lcpl)")
+        # Handle external license file if provided
+        if license_file:
+            if not license_file.is_file():
+                raise ValueError(f"License file not found: {license_file}")
+            license_data = json.loads(license_file.read_text())
+        else:
+            if "META-INF/license.lcpl" not in zin.namelist():
+                raise ValueError("Not an LCP-protected EPUB (missing META-INF/license.lcpl)")
+            license_data = json.loads(zin.read("META-INF/license.lcpl"))
+
         if "META-INF/encryption.xml" not in zin.namelist():
             raise ValueError("Not an LCP-protected EPUB (missing META-INF/encryption.xml)")
-
-        license_data = json.loads(zin.read("META-INF/license.lcpl"))
         profile = license_data["encryption"]["profile"]
         print(f"Profile: {profile}")
 
@@ -85,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Output EPUB path (default: <input-stem> (unlocked).epub)",
     )
+    parser.add_argument(
+        "-l",
+        "--license-file",
+        type=Path,
+        help="Path to external license file (if not embedded in EPUB)",
+    )
     args = parser.parse_args(argv)
 
     if not args.input.is_file():
@@ -94,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or args.input.with_name(f"{args.input.stem} (unlocked).epub")
 
     try:
-        decrypt_epub(args.input, output, args.passphrase)
+        decrypt_epub(args.input, output, args.passphrase, args.license_file)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
